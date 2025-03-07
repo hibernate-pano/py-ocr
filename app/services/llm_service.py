@@ -149,7 +149,8 @@ class LLMService:
         }
         
         payload = {
-            'model': 'Pro/Qwen/Qwen2-VL-7B-Instruct',  # 硅基流动的多模态模型
+            # 'model': 'Pro/Qwen/Qwen2-VL-7B-Instruct',  # 硅基流动的多模态模型
+            'model': 'Qwen/Qwen2-VL-72B-Instruct',  # 硅基流动的多模态模型'model': 'Pro/Qwen/Qwen2-VL-7B-Instruct-v1',  # 硅基流动的多模态模型
             'messages': [
                 {
                     'role': 'user',
