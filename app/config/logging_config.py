@@ -29,7 +29,7 @@ def setup_logging():
                 'formatter': 'standard',
                 'class': 'logging.handlers.RotatingFileHandler',
                 'filename': os.path.join(log_dir, 'ocr_service.log'),
-                'maxBytes': 10485760,  # 10MB
+                'maxBytes': 10485760,  
                 'backupCount': 5,
                 'encoding': 'utf8',
             },
@@ -38,7 +38,7 @@ def setup_logging():
                 'formatter': 'standard',
                 'class': 'logging.handlers.RotatingFileHandler',
                 'filename': os.path.join(log_dir, 'error.log'),
-                'maxBytes': 10485760,  # 10MB
+                'maxBytes': 10485760,  
                 'backupCount': 5,
                 'encoding': 'utf8',
             },

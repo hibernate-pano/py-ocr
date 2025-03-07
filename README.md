@@ -27,14 +27,16 @@
 4. 安装并运行 Redis 服务
 5. 安装并运行 Minio 服务
 
-#### Windows安装Tesseract
+#### Windows 安装 Tesseract
+
 ```
 # 下载并安装Tesseract: https://github.com/UB-Mannheim/tesseract/wiki
 # 确保安装中文语言包
 # 将Tesseract安装路径添加到环境变量PATH中
 ```
 
-#### Linux安装Tesseract
+#### Linux 安装 Tesseract
+
 ```bash
 sudo apt update
 sudo apt install tesseract-ocr
@@ -65,19 +67,19 @@ CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
 # 应用配置
-MAX_CONTENT_LENGTH=10485760  # 10MB
+MAX_CONTENT_LENGTH=10485760
 UPLOAD_FOLDER=temp
 ```
 
 ## 运行
 
-### 启动Flask应用
+### 启动 Flask 应用
 
 ```bash
 python app.py
 ```
 
-### 启动Celery Worker
+### 启动 Celery Worker
 
 ```bash
 # Windows
@@ -87,7 +89,7 @@ celery -A celery_worker.celery worker --pool=solo -l info
 celery -A celery_worker.celery worker -l info
 ```
 
-## API文档
+## API 文档
 
 ### 1. 上传文件
 
@@ -107,7 +109,7 @@ celery -A celery_worker.celery worker -l info
   - 处理中: `{"status": "processing"}`
   - 已完成: `{"status": "completed", "minio_url": "文件URL"}`
   - 失败: `{"status": "failed", "error": "错误信息"}`
-  - 任务ID不存在: `{"error": "Task ID not found"}`
+  - 任务 ID 不存在: `{"error": "Task ID not found"}`
 
 ## 测试
 
@@ -138,4 +140,4 @@ py-ocr/
 
 ## 许可证
 
-MIT 
+MIT

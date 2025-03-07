@@ -14,4 +14,4 @@ if __name__ == '__main__':
         os.makedirs(app.config['UPLOAD_FOLDER'])
     
     # 启动应用
-    app.run(host='0.0.0.0', port=5000) 
+    app.run(host='0.0.0.0', port=15000) 
