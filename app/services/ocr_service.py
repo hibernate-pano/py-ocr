@@ -7,6 +7,7 @@ import tempfile
 from typing import List, Optional, Dict
 from threading import Lock
 from io import BytesIO
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class OCRService:
     
     def process_image(self, image_path: str, task_id: str) -> str:
         """
-        处理图片文件识别文本
+        处理单张图片进行OCR识别
         
         参数:
             image_path: 图片文件路径
@@ -121,72 +122,66 @@ class OCRService:
         try:
             logger.info(f"开始处理图片: {image_path}")
             
-            # 检查文件是否存在
-            if not os.path.exists(image_path):
-                error_msg = f"图片文件不存在: {image_path}"
-                logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
-            
-            # 检查文件是否可读
-            try:
-                with open(image_path, 'rb') as f:
-                    image_content = f.read()
-                    if not image_content:
-                        raise ValueError("图片文件为空")
-            except Exception as e:
-                error_msg = f"图片文件无法读取: {str(e)}"
-                logger.error(error_msg)
-                raise
-            
             # 检查任务是否已取消
             if self._is_task_cancelled(task_id):
                 logger.info(f"任务已取消，停止处理图片: {task_id}")
                 raise TaskCancelledException(f"任务已取消: {task_id}")
             
+            # 验证图片文件是否存在
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"图片文件不存在: {image_path}")
+            
+            # 打开图片
             try:
-                # 使用BytesIO避免文件系统问题
-                image_buffer = BytesIO(image_content)
-                
-                # 使用with语句确保图像文件正确关闭
-                with Image.open(image_buffer) as image:
-                    # 验证图片格式
-                    if image.format not in ['PNG', 'JPEG', 'JPG', 'BMP', 'TIFF']:
-                        raise ValueError(f"不支持的图片格式: {image.format}")
-                    
-                    # 图像预处理
-                    processed_image = self.preprocess_image(image)
-                    
-                    # 再次检查任务是否已取消
-                    if self._is_task_cancelled(task_id):
-                        logger.info(f"任务已取消，停止OCR处理: {task_id}")
-                        raise TaskCancelledException(f"任务已取消: {task_id}")
-                    
-                    # OCR识别
-                    text = pytesseract.image_to_string(processed_image, lang=self.languages)
-                    
-                    # 确保返回的是字符串类型
-                    if isinstance(text, bytes):
-                        text = text.decode('utf-8')
-                    elif not isinstance(text, str):
-                        text = str(text)
-                    
-                    if not text.strip():
-                        logger.warning(f"图片 {image_path} 没有识别出文本")
-                    
-                    logger.info(f"图片OCR处理完成: {image_path}")
-                    return text
-                    
-            except TaskCancelledException:
-                raise
+                image = Image.open(image_path)
+                logger.info(f"成功打开图片: {image_path}")
+                logger.info(f"图片格式: {image.format}")
+                logger.info(f"图片大小: {image.size}")
             except Exception as e:
-                error_msg = f"图片处理失败: {str(e)}"
+                error_msg = f"图片打开失败: {str(e)}"
                 logger.error(error_msg)
+                raise
+            
+            # 预处理图片
+            try:
+                image = self.preprocess_image(image)
+                logger.info("图片预处理完成")
+            except Exception as e:
+                error_msg = f"图片预处理失败: {str(e)}"
+                logger.error(error_msg)
+                raise
+            
+            # 执行OCR识别
+            try:
+                text = pytesseract.image_to_string(image, lang=self.languages)
+                logger.info(f"OCR识别完成，结果类型: {type(text)}")
+                logger.info(f"OCR识别结果长度: {len(text)}")
+                
+                # 确保返回的是字符串类型
+                if isinstance(text, bytes):
+                    logger.info("OCR结果为bytes类型，正在解码")
+                    text = text.decode('utf-8')
+                elif not isinstance(text, str):
+                    logger.info(f"OCR结果为{type(text)}类型，正在转换为字符串")
+                    text = str(text)
+                
+                logger.info(f"转换后的文本类型: {type(text)}")
+                logger.info(f"转换后的文本长度: {len(text)}")
+                return text
+                
+            except Exception as e:
+                error_msg = f"OCR识别失败: {str(e)}"
+                logger.error(error_msg)
+                logger.error(f"错误类型: {type(e)}")
+                logger.error(f"错误详情: {traceback.format_exc()}")
                 raise
             
         except TaskCancelledException:
             raise
         except Exception as e:
             logger.error(f"图片OCR处理失败: {str(e)}")
+            logger.error(f"错误类型: {type(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
             raise
     
     def split_pdf_to_images(self, pdf_path: str, task_id: str) -> List[str]:
@@ -281,11 +276,18 @@ class OCRService:
                 
                 # 处理图片
                 page_text = self.process_image(image_path, task_id)
+                logger.info(f"第{i+1}页OCR结果类型: {type(page_text)}")
+                
                 # 确保page_text是字符串类型
                 if isinstance(page_text, bytes):
+                    logger.info(f"第{i+1}页OCR结果为bytes类型，正在解码")
                     page_text = page_text.decode('utf-8')
                 elif not isinstance(page_text, str):
+                    logger.info(f"第{i+1}页OCR结果为{type(page_text)}类型，正在转换为字符串")
                     page_text = str(page_text)
+                
+                logger.info(f"第{i+1}页转换后的文本类型: {type(page_text)}")
+                logger.info(f"第{i+1}页文本长度: {len(page_text)}")
                 
                 if page_text.strip():  # 只添加非空文本
                     all_text.append(page_text)
@@ -296,11 +298,18 @@ class OCRService:
             
             # 确保返回的是字符串类型
             result = "\n\n".join(all_text)
+            logger.info(f"合并后的文本类型: {type(result)}")
+            logger.info(f"合并后的文本长度: {len(result)}")
+            
             if isinstance(result, bytes):
+                logger.info("合并后的文本为bytes类型，正在解码")
                 result = result.decode('utf-8')
             elif not isinstance(result, str):
+                logger.info(f"合并后的文本为{type(result)}类型，正在转换为字符串")
                 result = str(result)
             
+            logger.info(f"最终返回的文本类型: {type(result)}")
+            logger.info(f"最终返回的文本长度: {len(result)}")
             logger.info("OCR处理完成")
             return result
             
@@ -308,6 +317,8 @@ class OCRService:
             raise
         except Exception as e:
             logger.error(f"OCR处理失败: {str(e)}")
+            logger.error(f"错误类型: {type(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
             raise
 
     def process_pdf(self, pdf_path: str, task_id: str) -> str:

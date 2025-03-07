@@ -3,6 +3,10 @@ from minio import Minio
 from minio.error import S3Error
 from flask import current_app
 import os
+from io import BytesIO
+from datetime import timedelta
+import traceback
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -80,40 +84,66 @@ class MinioService:
             logger.error(f"确保存储桶存在失败: {str(e)}")
             raise
     
-    def upload_text(self, object_name, text_content):
-        """上传文本内容到MinIO"""
+    def upload_text(self, object_name: str, text_content: Union[str, bytes]) -> str:
+        """
+        上传文本内容到MinIO
+        
+        参数:
+            object_name: 对象名称
+            text_content: 文本内容（字符串或字节）
+            
+        返回:
+            str: 预签名URL
+        """
         try:
+            logger.info(f"开始上传文本内容到MinIO: {object_name}")
+            logger.info(f"文本内容类型: {type(text_content)}")
+            
+            # 确保已连接到MinIO
             self.connect()
             
             # 确保text_content是字符串类型
             if isinstance(text_content, bytes):
+                logger.info("检测到文本内容为bytes类型，正在解码为字符串")
                 text_content = text_content.decode('utf-8')
             elif not isinstance(text_content, str):
+                logger.info(f"检测到文本内容为{type(text_content)}类型，正在转换为字符串")
                 text_content = str(text_content)
             
-            # 将文本转换为字节流
+            logger.info(f"转换后的文本内容类型: {type(text_content)}")
+            logger.info(f"文本内容长度: {len(text_content)}")
+            
+            # 将文本内容转换为字节流
             text_bytes = text_content.encode('utf-8')
+            logger.info(f"转换后的字节流长度: {len(text_bytes)}")
+            
+            # 创建BytesIO对象
+            text_stream = BytesIO(text_bytes)
+            logger.info("成功创建BytesIO对象")
             
             # 上传到MinIO
             self.client.put_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,
-                data=text_bytes,
+                data=text_stream,
                 length=len(text_bytes),
                 content_type='text/plain'
             )
+            logger.info(f"成功上传文本内容到MinIO: {object_name}")
             
-            # 生成文件访问URL（7天有效）
+            # 生成预签名URL
             url = self.client.presigned_get_object(
                 bucket_name=self.bucket_name,
                 object_name=object_name,
-                expires=7*24*60*60  # 7天有效期
+                expires=timedelta(days=7)
             )
-            
-            logger.info(f"已上传文本到: {object_name}")
+            logger.info(f"成功生成预签名URL: {url}")
             return url
-        except S3Error as e:
-            logger.error(f"MinIO上传失败: {str(e)}")
+            
+        except Exception as e:
+            logger.error(f"上传文本内容失败: {str(e)}")
+            logger.error(f"错误类型: {type(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
             raise
     
     def upload_file(self, object_name, file_path):
