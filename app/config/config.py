@@ -36,6 +36,22 @@ class Config:
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///ocr_service.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # OCR配置
+    OCR_LANGUAGES = os.getenv('OCR_LANGUAGES', 'chi_sim+eng')  # 默认中文+英文
+    
+    # 硅基流动API配置
+    SILICON_FLOW_API_KEY = os.getenv('SILICON_FLOW_API_KEY', '')
+    SILICON_FLOW_API_URL = os.getenv('SILICON_FLOW_API_URL', 'https://api.siliconflow.com/v1')
+    
+    # Ollama配置
+    OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3.2-vision:11b')
+    # 设置Ollama API超时时间（秒）
+    OLLAMA_TIMEOUT = int(os.getenv('OLLAMA_TIMEOUT', 120))
+    
+    # Ollama-OCR配置
+    OLLAMA_OUTPUT_FORMAT = os.getenv('OLLAMA_OUTPUT_FORMAT', 'plain_text')
 
 class DevelopmentConfig(Config):
     """开发环境配置"""

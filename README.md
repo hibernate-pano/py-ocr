@@ -23,13 +23,20 @@
    - 复杂图像内容理解和提取
    - 强大的重试机制和错误恢复能力
 
-4. **存储管理**
+4. **Ollama OCR 能力**
+
+   - 集成 [Ollama-OCR](https://github.com/imanoop7/Ollama-OCR) 项目提供高精度识别
+   - 支持多种多模态模型：LLaVA 7B, Llama 3.2 Vision 等
+   - 支持多种输出格式：纯文本、Markdown、JSON、结构化数据、键值对
+   - 本地部署，保护数据隐私和安全
+
+5. **存储管理**
 
    - Minio 对象存储集成
    - 自动文件命名和分类
    - 临时文件自动清理
 
-5. **任务管理**
+6. **任务管理**
    - 异步任务处理
    - 任务状态实时查询
    - 失败任务自动重试
@@ -38,7 +45,9 @@
 
 - **后端框架:** Flask
 - **OCR 引擎:** Tesseract (需安装中文语言包 tesseract-ocr-chi_sim)
-- **多模态大模型:** 通过硅基流动 API 调用
+- **多模态大模型:**
+  - 通过硅基流动 API 调用
+  - 基于 Ollama 的本地模型
 - **对象存储:** Minio
 - **异步任务队列:** Celery + Redis
 - **数据存储:** SQLite
@@ -55,6 +64,7 @@
 - Minio 服务
 - 足够的磁盘空间用于临时文件存储
 - 硅基流动 API 账号和密钥（用于多模态大模型功能）
+- Ollama (用于本地部署多模态模型，可选)
 
 ### 安装步骤
 
@@ -108,6 +118,26 @@ cp .env.example .env
 # 编辑 .env 文件，设置必要的配置
 ```
 
+#### 安装 Ollama (可选)
+
+1. **安装 Ollama**
+   按照 [Ollama 官方文档](https://github.com/ollama/ollama) 的指引安装 Ollama
+
+2. **下载所需模型**
+
+   ```bash
+   # 下载 LLaVA 模型用于图像识别
+   ollama pull llava
+
+   # 或者下载 Llama 3.2 Vision 模型（推荐）
+   ollama pull llama3.2-vision:11b
+   ```
+
+3. **安装 ollama-ocr 包**
+   ```bash
+   pip install ollama-ocr
+   ```
+
 ### 配置说明
 
 主要配置项说明：
@@ -131,6 +161,12 @@ UPLOAD_FOLDER=temp              # 临时文件目录
 # 硅基流动API配置
 SILICON_FLOW_API_KEY=your_api_key       # 硅基流动API密钥
 SILICON_FLOW_API_URL=https://api.siliconflow.com/v1  # API地址
+
+# Ollama配置
+OLLAMA_BASE_URL=http://localhost:11434   # Ollama API地址
+OLLAMA_MODEL=llama3.2-vision:11b        # 使用的模型名称
+OLLAMA_OUTPUT_FORMAT=plain_text         # 输出格式（plain_text/markdown/json/structured/key_value）
+OLLAMA_TIMEOUT=120                      # API超时时间（秒）
 ```
 
 ## 运行服务
@@ -200,6 +236,42 @@ curl -X POST -F "file=@test.pdf" http://localhost:5000/api/llm/upload
 ```bash
 curl http://localhost:5000/api/llm/status/<task_id>
 ```
+
+5. **Ollama OCR 服务 - 上传文件**
+
+```bash
+curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload
+```
+
+6. **Ollama OCR 服务 - 查询状态**
+
+```bash
+curl http://localhost:5000/api/ocr/status/<task_id>
+```
+
+## OCR 引擎对比
+
+现在本服务提供三种 OCR 引擎选择：
+
+| 功能         | Tesseract OCR | 多模态大模型 (硅基流动) | Ollama-OCR (GitHub 项目) |
+| ------------ | ------------- | ----------------------- | ------------------------ |
+| 处理速度     | 快            | 较慢                    | 中等                     |
+| 识别精度     | 中等          | 高                      | 高                       |
+| 复杂布局处理 | 有限          | 优秀                    | 较好                     |
+| 图表理解     | 不支持        | 支持                    | 支持                     |
+| 手写文字识别 | 有限          | 优秀                    | 较好                     |
+| 低质量图像   | 效果一般      | 较好                    | 较好                     |
+| API 费用     | 无            | 基于使用量              | 无                       |
+| 离线使用     | 支持          | 不支持                  | 支持                     |
+| 硬件要求     | 低            | 低                      | 高 (建议使用 GPU)        |
+| 多语言支持   | 需安装语言包  | 内置多语言支持          | 内置多语言支持           |
+| 输出格式     | 纯文本        | 纯文本                  | 多种格式                 |
+
+根据您的具体需求和环境条件，选择合适的 OCR 引擎：
+
+1. **Tesseract OCR**: 适合简单文档、本地处理、低资源环境
+2. **多模态大模型**: 适合复杂文档、高质量要求、无本地 GPU
+3. **Ollama-OCR**: 适合复杂文档、本地部署、多格式输出需求
 
 ## 开发指南
 

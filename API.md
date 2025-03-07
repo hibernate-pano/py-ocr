@@ -303,6 +303,161 @@
   }
   ```
 
+### 8. Ollama OCR 文件上传接口
+
+用于上传需要通过 Ollama 处理的文件，利用 Ollama 的多模态模型识别图片中的文本。
+
+- **URL**: `/ocr/upload`
+- **方法**: `POST`
+- **内容类型**: `multipart/form-data`
+- **参数**:
+
+  | 参数名 | 类型 | 必填 | 描述                                    |
+  | ------ | ---- | ---- | --------------------------------------- |
+  | file   | 文件 | 是   | 需要上传的文件，支持 PDF 和常见图片格式 |
+
+- **响应**:
+
+  - **成功** (HTTP 200):
+    ```json
+    {
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "message": "文件上传成功，正在使用Ollama OCR处理中"
+    }
+    ```
+  - **失败** (HTTP 400):
+    ```json
+    {
+      "error": "没有上传文件",
+      "code": "NO_FILE_UPLOADED"
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "不支持的文件类型",
+      "code": "UNSUPPORTED_FILE_TYPE",
+      "supported_types": ["pdf", "png", "jpg", "jpeg", "tiff"]
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "文件大小超过限制",
+      "code": "FILE_TOO_LARGE",
+      "max_size": 10485760
+    }
+    ```
+  - **失败** (HTTP 500):
+    ```json
+    {
+      "error": "服务器内部错误",
+      "code": "INTERNAL_SERVER_ERROR"
+    }
+    ```
+
+- **示例**:
+  ```bash
+  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload
+  ```
+
+### 9. Ollama OCR 查询任务状态接口
+
+用于获取 Ollama OCR 任务的处理状态和结果。
+
+- **URL**: `/ocr/status/<task_id>`
+- **方法**: `GET`
+- **URL 参数**:
+
+  | 参数名  | 类型   | 必填 | 描述    |
+  | ------- | ------ | ---- | ------- |
+  | task_id | 字符串 | 是   | 任务 ID |
+
+- **响应**:
+
+  - **成功，任务处理中** (HTTP 200):
+    ```json
+    {
+      "status": "processing",
+      "task_id": "550e8400-e29b-41d4-a716-446655440000"
+    }
+    ```
+  - **成功，任务已完成** (HTTP 200):
+    ```json
+    {
+      "status": "completed",
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "minio_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt"
+    }
+    ```
+  - **成功，任务失败** (HTTP 200):
+    ```json
+    {
+      "status": "failed",
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "error": "Ollama OCR处理失败: 服务不可用"
+    }
+    ```
+  - **失败，任务不存在** (HTTP 404):
+    ```json
+    {
+      "error": "Task ID not found",
+      "code": "TASK_NOT_FOUND"
+    }
+    ```
+
+- **示例**:
+  ```bash
+  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000
+  ```
+
+### 10. Ollama OCR 取消任务接口
+
+用于取消正在进行的 Ollama OCR 任务。
+
+- **URL**: `/ocr/cancel/<task_id>`
+- **方法**: `POST`
+- **URL 参数**:
+
+  | 参数名  | 类型   | 必填 | 描述    |
+  | ------- | ------ | ---- | ------- |
+  | task_id | 字符串 | 是   | 任务 ID |
+
+- **响应**:
+
+  - **成功** (HTTP 200):
+    ```json
+    {
+      "message": "任务已取消"
+    }
+    ```
+  - **失败** (HTTP 400):
+    ```json
+    {
+      "error": "只能取消处理中的任务",
+      "current_status": "completed"
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "取消任务失败",
+      "code": "CANCEL_FAILED"
+    }
+    ```
+  - **失败，任务不存在** (HTTP 404):
+    ```json
+    {
+      "error": "Task ID not found",
+      "code": "TASK_NOT_FOUND"
+    }
+    ```
+
+- **示例**:
+  ```bash
+  curl -X POST http://localhost:5000/api/ocr/cancel/550e8400-e29b-41d4-a716-446655440000
+  ```
+
 ## 错误代码
 
 | HTTP 状态码 | 错误代码              | 描述             |

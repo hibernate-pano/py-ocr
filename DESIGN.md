@@ -16,14 +16,15 @@
                    |           |        |             |
                    | SQLite DB |        | OCR Worker  |
                    |           |        | LLM Worker  |
-                   +-----------+        +-------------+
+                   +-----------+        | Ollama Worker|
+                                        +-------------+
                                              |
                                              v
-                                    +----------------+     +---------------+
-                                    |                |     |               |
-                                    | MinIO Storage  |     | 硅基流动 API   |
-                                    |                |     |               |
-                                    +----------------+     +---------------+
+                                    +----------------+     +---------------+     +----------------+
+                                    |                |     |               |     |                |
+                                    | MinIO Storage  |     | 硅基流动 API   |     | Ollama API     |
+                                    |                |     |               |     |                |
+                                    +----------------+     +---------------+     +----------------+
 ```
 
 ### 1.2 核心组件
@@ -33,8 +34,10 @@
 - **SQLite DB**: 存储任务状态和结果
 - **OCR Worker**: 处理 OCR 识别任务
 - **LLM Worker**: 处理多模态大模型识别任务
+- **Ollama Worker**: 处理基于 Ollama 的本地多模态模型识别任务
 - **MinIO Storage**: 对象存储服务
 - **硅基流动 API**: 提供多模态大模型服务
+- **Ollama API**: 提供本地部署的多模态模型服务
 
 ### 1.3 技术栈选型理由
 
@@ -44,6 +47,7 @@
 - **MinIO**: 兼容 S3 协议，支持分布式部署
 - **Tesseract**: 开源 OCR 引擎，支持多语言
 - **多模态大模型**: 通过硅基流动 API 调用，提供更高精度的图像理解和文本识别能力
+- **Ollama**: 本地部署的多模态大模型，支持离线处理，适合对数据隐私要求高的场景
 
 ## 2. 项目结构
 
@@ -66,11 +70,13 @@ py-ocr/
 │   │   ├── __init__.py
 │   │   ├── minio_service.py  # MinIO服务
 │   │   ├── ocr_service.py    # OCR服务
-│   │   └── llm_service.py    # LLM服务
+│   │   ├── llm_service.py    # LLM服务
+│   │   └── ollama_ocr_service.py # Ollama OCR服务
 │   ├── tasks/            # 任务层
 │   │   ├── __init__.py
 │   │   ├── ocr_task.py  # OCR Celery任务
-│   │   └── llm_task.py  # LLM Celery任务
+│   │   ├── llm_task.py  # LLM Celery任务
+│   │   └── ollama_ocr_task.py # Ollama OCR Celery任务
 │   └── utils/           # 工具层
 │       └── __init__.py
 ├── tests/               # 测试目录
@@ -209,6 +215,26 @@ sequenceDiagram
     LLMService->>SiliconFlowAPI: 调用多模态API
     SiliconFlowAPI-->>LLMService: 返回识别结果
     LLMService->>Storage: 保存结果
+    Storage-->>Worker: 返回URL
+    Worker->>DB: 更新状态
+```
+
+### 4.4 Ollama OCR 处理流程
+
+```mermaid
+sequenceDiagram
+    participant Queue
+    participant Worker
+    participant OllamaOCRService
+    participant OllamaAPI
+    participant Storage
+    participant DB
+
+    Queue->>Worker: 获取任务
+    Worker->>OllamaOCRService: 处理文件
+    OllamaOCRService->>OllamaAPI: 调用多模态API
+    OllamaAPI-->>OllamaOCRService: 返回识别结果
+    OllamaOCRService->>Storage: 保存结果
     Storage-->>Worker: 返回URL
     Worker->>DB: 更新状态
 ```
@@ -472,3 +498,78 @@ services:
    - API 不可用时自动降级
    - 超时处理
    - 备用方案
+
+## 17. Ollama 集成
+
+### 17.1 Ollama 简介
+
+Ollama 是一个轻量级的框架，允许在本地运行各种大型语言模型 (LLMs)，包括 Llama 2、LLaVA (多模态模型) 等。通过 Ollama，我们可以在本地部署和运行多模态模型，无需依赖外部 API 服务。
+
+### 17.2 Ollama 功能
+
+1. **本地运行多模态模型**
+
+   - 支持 LLaVA 等多模态模型
+   - 本地处理图像和提取文本
+   - 保护数据隐私和安全
+
+2. **API 调用方式**
+
+   - RESTful API 接口
+   - 支持图像 base64 编码传输
+   - 支持自定义提示词和参数
+
+3. **批量处理能力**
+   - 支持 PDF 文件分页处理
+   - 自动合并多页结果
+   - 任务状态管理和取消
+
+### 17.3 Ollama 集成架构
+
+1. **服务层**
+
+   - OllamaOCRService 类封装 Ollama API 调用
+   - 提供任务管理和取消能力
+   - 处理不同文件类型 (PDF、图像)
+
+2. **任务层**
+
+   - Celery 异步任务处理
+   - 任务重试和错误恢复
+   - 结果存储和状态更新
+
+3. **API 层**
+   - 提供 `/ocr/upload` 接口
+   - 任务状态查询接口
+   - 任务取消接口
+
+### 17.4 Ollama 与其他 OCR 引擎对比
+
+| 功能         | Ollama OCR         | Tesseract OCR      | 硅基流动 API       |
+| ------------ | ------------------ | ------------------ | ------------------ |
+| 部署方式     | 本地/私有云        | 本地/私有云        | 云服务             |
+| 处理性能     | 依赖硬件           | 快                 | 快                 |
+| 识别精度     | 高                 | 中等               | 高                 |
+| 离线工作     | 支持               | 支持               | 不支持             |
+| 数据隐私     | 较好               | 好                 | 一般               |
+| 系统资源需求 | 高 (GPU)           | 低                 | 低                 |
+| 适用场景     | 复杂文档、私有数据 | 简单文档、批量处理 | 高精度需求、低延迟 |
+
+### 17.5 Ollama 部署建议
+
+1. **硬件建议**
+
+   - CPU: 4 核以上
+   - RAM: 16GB 以上
+   - GPU: NVIDIA GPU 8GB+显存 (推荐)
+   - 存储: SSD 50GB+
+
+2. **模型选择**
+
+   - 文本识别: LLaVA (推荐)
+   - 其他选项: BakLLaVA, llava-13b
+
+3. **性能优化**
+   - 调整批处理大小
+   - 设置合理的超时时间
+   - 使用 GPU 加速
