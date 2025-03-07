@@ -2,6 +2,7 @@ import logging
 from minio import Minio
 from minio.error import S3Error
 from flask import current_app
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,25 @@ class MinioService:
     def __init__(self):
         self.client = None
         self.bucket_name = None
+        self._endpoint = None
+        self._access_key = None
+        self._secret_key = None
+        self._secure = None
+    
+    def _load_config(self):
+        """从环境变量或应用配置加载MinIO配置"""
+        try:
+            # 优先从环境变量获取配置
+            self._endpoint = os.getenv('MINIO_ENDPOINT') or current_app.config['MINIO_ENDPOINT']
+            self._access_key = os.getenv('MINIO_ACCESS_KEY') or current_app.config['MINIO_ACCESS_KEY']
+            self._secret_key = os.getenv('MINIO_SECRET_KEY') or current_app.config['MINIO_SECRET_KEY']
+            self._secure = os.getenv('MINIO_SECURE', '').lower() == 'true' if os.getenv('MINIO_SECURE') else current_app.config['MINIO_SECURE']
+            self.bucket_name = os.getenv('MINIO_BUCKET_NAME') or current_app.config['MINIO_BUCKET_NAME']
+            
+            logger.info("MinIO配置加载成功")
+        except Exception as e:
+            logger.error(f"MinIO配置加载失败: {str(e)}")
+            raise
     
     def connect(self):
         """连接到MinIO服务器"""
@@ -18,25 +38,21 @@ class MinioService:
             return
         
         try:
-            # 从配置获取MinIO连接信息
-            endpoint = current_app.config['MINIO_ENDPOINT']
-            access_key = current_app.config['MINIO_ACCESS_KEY']
-            secret_key = current_app.config['MINIO_SECRET_KEY']
-            secure = current_app.config['MINIO_SECURE']
-            self.bucket_name = current_app.config['MINIO_BUCKET_NAME']
+            # 加载配置
+            self._load_config()
             
             # 创建MinIO客户端
             self.client = Minio(
-                endpoint=endpoint,
-                access_key=access_key,
-                secret_key=secret_key,
-                secure=secure
+                endpoint=self._endpoint,
+                access_key=self._access_key,
+                secret_key=self._secret_key,
+                secure=self._secure
             )
             
             # 确保bucket存在
             self.ensure_bucket_exists()
             
-            logger.info(f"成功连接到MinIO服务器: {endpoint}")
+            logger.info(f"成功连接到MinIO服务器: {self._endpoint}")
         except Exception as e:
             logger.error(f"MinIO连接失败: {str(e)}")
             raise
@@ -68,6 +84,12 @@ class MinioService:
         """上传文本内容到MinIO"""
         try:
             self.connect()
+            
+            # 确保text_content是字符串类型
+            if isinstance(text_content, bytes):
+                text_content = text_content.decode('utf-8')
+            elif not isinstance(text_content, str):
+                text_content = str(text_content)
             
             # 将文本转换为字节流
             text_bytes = text_content.encode('utf-8')

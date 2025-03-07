@@ -1,17 +1,11 @@
-import os
-from app import create_app, celery
-from app.config.logging_config import setup_logging
+"""
+Celery worker 入口文件
+"""
+from app import create_app
+from app.celery_app import init_celery
 
-# 设置日志
-setup_logging()
+# 创建Flask应用实例
+flask_app = create_app()
 
-# 确保临时目录存在
-app = create_app()
-if not os.path.exists(app.config['UPLOAD_FOLDER']):
-    os.makedirs(app.config['UPLOAD_FOLDER'])
-
-# 推送应用上下文
-app.app_context().push()
-
-# 自动导入所有任务
-import app.tasks.ocr_task 
+# 使用Flask应用实例初始化Celery
+celery = init_celery(flask_app) 

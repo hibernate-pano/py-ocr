@@ -2,12 +2,14 @@ import os
 import json
 import sqlite3
 from enum import Enum
+from typing import Optional, Dict, Any
 
 # 定义任务状态枚举
 class TaskStatus(Enum):
     PROCESSING = 'processing'
     COMPLETED = 'completed'
     FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 # SQLite数据库文件路径
 DB_PATH = os.path.join(os.getcwd(), 'instance', 'ocr_service.db')
@@ -34,55 +36,49 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_task_status(task_id, status, result_url=None, error=None):
-    """保存任务状态到数据库"""
-    # 确保数据库已初始化
-    init_db()
+def save_task_status(task_id: str, status: str, result_url: Optional[str] = None, error: Optional[str] = None):
+    """
+    保存任务状态
     
+    参数:
+        task_id: 任务ID
+        status: 任务状态
+        result_url: 结果URL（可选）
+        error: 错误信息（可选）
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 检查任务是否已存在
-    cursor.execute('SELECT id FROM tasks WHERE id = ?', (task_id,))
-    exists = cursor.fetchone()
-    
-    if exists:
-        # 更新现有任务
-        cursor.execute(
-            'UPDATE tasks SET status = ?, result_url = ?, error = ? WHERE id = ?',
-            (status, result_url, error, task_id)
-        )
-    else:
-        # 插入新任务
-        cursor.execute(
-            'INSERT INTO tasks (id, status, result_url, error) VALUES (?, ?, ?, ?)',
-            (task_id, status, result_url, error)
-        )
+    cursor.execute('''
+    INSERT OR REPLACE INTO tasks (id, status, result_url, error)
+    VALUES (?, ?, ?, ?)
+    ''', (task_id, status, result_url, error))
     
     conn.commit()
     conn.close()
 
-def get_task_status(task_id):
-    """获取任务状态"""
-    # 确保数据库已初始化
-    init_db()
+def get_task_status(task_id: str) -> Optional[Dict[str, Any]]:
+    """
+    获取任务状态
     
+    参数:
+        task_id: 任务ID
+        
+    返回:
+        任务状态信息字典，如果任务不存在则返回None
+    """
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # 使结果可以通过列名访问
     cursor = conn.cursor()
     
-    cursor.execute('SELECT * FROM tasks WHERE id = ?', (task_id,))
-    task = cursor.fetchone()
+    cursor.execute('SELECT status, result_url, error FROM tasks WHERE id = ?', (task_id,))
+    result = cursor.fetchone()
     
     conn.close()
     
-    if task:
+    if result:
         return {
-            'id': task['id'],
-            'status': task['status'],
-            'result_url': task['result_url'],
-            'error': task['error'],
-            'created_at': task['created_at']
+            'status': result[0],
+            'result_url': result[1],
+            'error': result[2]
         }
-    
     return None 
