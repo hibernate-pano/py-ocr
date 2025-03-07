@@ -15,15 +15,15 @@
                    +-----------+        +-------------+
                    |           |        |             |
                    | SQLite DB |        | OCR Worker  |
-                   |           |        |             |
+                   |           |        | LLM Worker  |
                    +-----------+        +-------------+
                                              |
                                              v
-                                    +----------------+
-                                    |                |
-                                    | MinIO Storage  |
-                                    |                |
-                                    +----------------+
+                                    +----------------+     +---------------+
+                                    |                |     |               |
+                                    | MinIO Storage  |     | 硅基流动 API   |
+                                    |                |     |               |
+                                    +----------------+     +---------------+
 ```
 
 ### 1.2 核心组件
@@ -32,7 +32,9 @@
 - **Celery Queue**: 异步任务队列
 - **SQLite DB**: 存储任务状态和结果
 - **OCR Worker**: 处理 OCR 识别任务
+- **LLM Worker**: 处理多模态大模型识别任务
 - **MinIO Storage**: 对象存储服务
+- **硅基流动 API**: 提供多模态大模型服务
 
 ### 1.3 技术栈选型理由
 
@@ -41,6 +43,7 @@
 - **SQLite**: 无需额外服务器，适合中小规模应用
 - **MinIO**: 兼容 S3 协议，支持分布式部署
 - **Tesseract**: 开源 OCR 引擎，支持多语言
+- **多模态大模型**: 通过硅基流动 API 调用，提供更高精度的图像理解和文本识别能力
 
 ## 2. 项目结构
 
@@ -62,10 +65,12 @@ py-ocr/
 │   ├── services/         # 服务层
 │   │   ├── __init__.py
 │   │   ├── minio_service.py  # MinIO服务
-│   │   └── ocr_service.py    # OCR服务
+│   │   ├── ocr_service.py    # OCR服务
+│   │   └── llm_service.py    # LLM服务
 │   ├── tasks/            # 任务层
 │   │   ├── __init__.py
-│   │   └── ocr_task.py  # Celery任务
+│   │   ├── ocr_task.py  # OCR Celery任务
+│   │   └── llm_task.py  # LLM Celery任务
 │   └── utils/           # 工具层
 │       └── __init__.py
 ├── tests/               # 测试目录
@@ -105,6 +110,7 @@ py-ocr/
 1. **单一职责原则 (SRP)**
 
    - OCRService 专注于文本识别
+   - LLMService 专注于多模态大模型识别
    - MinioService 专注于文件存储
    - TaskService 专注于任务管理
 
@@ -166,7 +172,7 @@ sequenceDiagram
     API->>Validator: 验证文件
     Validator-->>API: 验证结果
     API->>Storage: 保存临时文件
-    API->>Queue: 创建OCR任务
+    API->>Queue: 创建OCR/LLM任务
     API-->>Client: 返回任务ID
 ```
 
@@ -187,6 +193,26 @@ sequenceDiagram
     Worker->>DB: 更新状态
 ```
 
+### 4.3 LLM 处理流程
+
+```mermaid
+sequenceDiagram
+    participant Queue
+    participant Worker
+    participant LLMService
+    participant SiliconFlowAPI
+    participant Storage
+    participant DB
+
+    Queue->>Worker: 获取任务
+    Worker->>LLMService: 处理文件
+    LLMService->>SiliconFlowAPI: 调用多模态API
+    SiliconFlowAPI-->>LLMService: 返回识别结果
+    LLMService->>Storage: 保存结果
+    Storage-->>Worker: 返回URL
+    Worker->>DB: 更新状态
+```
+
 ## 5. 安全设计
 
 ### 5.1 系统安全
@@ -195,6 +221,7 @@ sequenceDiagram
 - CORS 配置
 - 请求限流
 - 文件大小限制
+- API 密钥管理
 
 ### 5.2 数据安全
 
@@ -202,6 +229,7 @@ sequenceDiagram
 - 临时文件清理
 - MinIO 访问控制
 - 数据备份策略
+- 敏感信息加密
 
 ## 6. 性能优化
 
@@ -218,6 +246,13 @@ sequenceDiagram
 - 并行处理
 - 结果缓存
 - 批量处理
+
+### 6.3 LLM 优化
+
+- 请求批处理
+- 结果缓存
+- 超时重试策略
+- 错误恢复机制
 
 ## 7. 可用性设计
 
@@ -359,11 +394,18 @@ services:
 - 高级 OCR 功能
 - 分布式部署支持
 
+### 13.4 v2.0.0
+
+- 多模态 LLM 集成
+- 双路识别引擎
+- 更丰富的图像理解能力
+
 ## 14. 风险评估
 
 ### 14.1 技术风险
 
 - OCR 准确率
+- LLM 响应时间
 - 系统性能
 - 数据安全
 - 服务可用性
@@ -390,3 +432,43 @@ services:
 - 性能调优
 - 功能增强
 - 文档更新
+
+## 16. 硅基流动 API 集成
+
+### 16.1 API 请求流程
+
+1. **认证授权**
+
+   - 使用 API 密钥进行认证
+   - JWT 令牌获取
+   - 权限校验
+
+2. **请求格式**
+
+   - 图像 Base64 编码
+   - 上传图像文件
+   - 请求参数配置
+
+3. **响应处理**
+   - 结果解析
+   - 错误处理
+   - 重试机制
+
+### 16.2 服务质量保障
+
+1. **性能监控**
+
+   - 调用延迟
+   - 并发请求
+   - 错误率
+
+2. **资源管理**
+
+   - 并发控制
+   - 流量控制
+   - 资源配额
+
+3. **降级策略**
+   - API 不可用时自动降级
+   - 超时处理
+   - 备用方案

@@ -1,6 +1,6 @@
 # Py OCR 服务
 
-一个基于 Flask、Tesseract 和 Minio 的 OCR 服务，提供 API 接口供外部调用，将 PDF 文件、图片等转换为文本并存储到 Minio，用户可以通过 API 获取处理状态和结果 URL。
+一个基于 Flask、Tesseract 和 Minio 的 OCR 服务，提供 API 接口供外部调用，将 PDF 文件、图片等转换为文本并存储到 Minio，用户可以通过 API 获取处理状态和结果 URL。同时，集成多模态大模型能力，提供更高精度的图像文本识别服务。
 
 ## 功能特点
 
@@ -16,13 +16,19 @@
    - 自动图像预处理优化
    - 高精度文本提取
 
-3. **存储管理**
+3. **多模态大模型能力**
+
+   - 通过硅基流动 API 调用多模态大模型
+   - 更高精度的图像文本识别
+   - 复杂图像内容理解和提取
+
+4. **存储管理**
 
    - Minio 对象存储集成
    - 自动文件命名和分类
    - 临时文件自动清理
 
-4. **任务管理**
+5. **任务管理**
    - 异步任务处理
    - 任务状态实时查询
    - 失败任务自动重试
@@ -31,6 +37,7 @@
 
 - **后端框架:** Flask
 - **OCR 引擎:** Tesseract (需安装中文语言包 tesseract-ocr-chi_sim)
+- **多模态大模型:** 通过硅基流动 API 调用
 - **对象存储:** Minio
 - **异步任务队列:** Celery + Redis
 - **数据存储:** SQLite
@@ -46,6 +53,7 @@
 - Redis 服务
 - Minio 服务
 - 足够的磁盘空间用于临时文件存储
+- 硅基流动 API 账号和密钥（用于多模态大模型功能）
 
 ### 安装步骤
 
@@ -118,6 +126,10 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/0 # 结果后端URL
 # 应用配置
 MAX_CONTENT_LENGTH=10485760      # 最大文件大小(10MB)
 UPLOAD_FOLDER=temp              # 临时文件目录
+
+# 硅基流动API配置
+SILICON_FLOW_API_KEY=your_api_key       # 硅基流动API密钥
+SILICON_FLOW_API_URL=https://api.siliconflow.com/v1  # API地址
 ```
 
 ## 运行服务
@@ -164,16 +176,28 @@ celery -A celery_worker.celery worker -l info
 
 ### 快速开始
 
-1. **上传文件**
+1. **OCR 服务 - 上传文件**
 
 ```bash
 curl -X POST -F "file=@test.pdf" http://localhost:5000/api/upload
 ```
 
-2. **查询状态**
+2. **OCR 服务 - 查询状态**
 
 ```bash
 curl http://localhost:5000/api/status/<task_id>
+```
+
+3. **LLM 服务 - 上传文件**
+
+```bash
+curl -X POST -F "file=@test.pdf" http://localhost:5000/api/llm/upload
+```
+
+4. **LLM 服务 - 查询状态**
+
+```bash
+curl http://localhost:5000/api/llm/status/<task_id>
 ```
 
 ## 开发指南
@@ -187,7 +211,12 @@ py-ocr/
 │   ├── config/            # 配置文件
 │   ├── models/            # 数据模型
 │   ├── services/          # 业务逻辑
+│   │   ├── minio_service.py  # MinIO服务
+│   │   ├── ocr_service.py    # OCR服务
+│   │   └── llm_service.py    # LLM服务
 │   ├── tasks/             # Celery任务
+│   │   ├── ocr_task.py       # OCR任务
+│   │   └── llm_task.py       # LLM任务
 │   └── utils/             # 工具函数
 ├── tests/                 # 测试目录
 ├── .env                   # 环境变量
@@ -238,17 +267,38 @@ python -m unittest discover -s tests
    - 检查图片质量
    - 确保安装了正确的语言包
    - 尝试调整图像预处理参数
+   - 考虑使用 LLM 识别路径
 
-2. **任务处理失败**
+2. **LLM 服务响应缓慢**
+
+   - 检查网络连接
+   - 验证 API 密钥是否有效
+   - 确认硅基流动服务状态
+   - 检查文件大小是否过大
+
+3. **任务处理失败**
 
    - 检查 Redis 服务状态
    - 查看 Celery worker 日志
    - 验证文件格式和大小
 
-3. **存储问题**
+4. **存储问题**
    - 确认 Minio 服务状态
    - 检查存储桶权限
    - 验证磁盘空间
+
+## LLM 和 OCR 功能对比
+
+| 功能         | OCR（Tesseract） | LLM（多模态大模型） |
+| ------------ | ---------------- | ------------------- |
+| 处理速度     | 较快             | 较慢                |
+| 识别精度     | 中等             | 高                  |
+| 复杂布局处理 | 有限             | 优秀                |
+| 图表理解     | 不支持           | 支持                |
+| 手写文字识别 | 有限             | 优秀                |
+| 低质量图像   | 效果一般         | 较好                |
+| API 费用     | 无               | 基于使用量          |
+| 离线使用     | 支持             | 不支持              |
 
 ## 贡献指南
 

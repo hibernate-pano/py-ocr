@@ -16,7 +16,7 @@ def init_celery(app: Flask = None) -> Celery:
         'ocr_service',
         broker=os.getenv('CELERY_BROKER_URL', 'redis://:in3BciMmiQ7Jz5aC@198.19.249.18:6379/0'),
         backend=os.getenv('CELERY_RESULT_BACKEND', 'redis://:in3BciMmiQ7Jz5aC@198.19.249.18:6379/0'),
-        include=['app.tasks.ocr_task']
+        include=['app.tasks.ocr_task', 'app.tasks.llm_task']
     )
     
     # 配置Celery
