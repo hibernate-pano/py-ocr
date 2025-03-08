@@ -211,7 +211,66 @@ celery -A celery_worker.celery worker -l info
 
 详细的 API 文档请参考 [API.md](API.md)
 
+### 统一 API 设计
+
+为了减少代码冗余和提高接口一致性，本项目采用了统一的 API 设计。主要特点如下：
+
+1. **统一的接口入口**：所有 OCR 相关功能通过统一的接口提供
+2. **类型参数区分**：使用`ocr_type`参数区分不同处理流程
+3. **向后兼容**：保留旧接口以保证兼容性
+
+#### OCR 类型参数说明
+
+- `standard`：标准 OCR 处理，使用 Tesseract 引擎（默认）
+- `llm`：基于大模型的 OCR 处理，通过硅基流动 API 调用
+- `ollama`：基于 Ollama 的本地多模态模型 OCR 处理
+
 ### 快速开始
+
+#### 使用统一 API
+
+1. **上传文件并处理**
+
+```bash
+# 使用标准OCR处理（默认）
+curl -X POST -F "file=@test.pdf" http://localhost:5000/api/unified/ocr/upload
+
+# 使用LLM处理
+curl -X POST -F "file=@test.pdf" http://localhost:5000/api/unified/ocr/upload?ocr_type=llm
+
+# 使用Ollama处理
+curl -X POST -F "file=@test.pdf" http://localhost:5000/api/unified/ocr/upload?ocr_type=ollama
+```
+
+2. **查询任务状态**
+
+```bash
+# 查询标准OCR任务状态
+curl http://localhost:5000/api/unified/ocr/status/<task_id>
+
+# 查询LLM任务状态
+curl http://localhost:5000/api/unified/ocr/status/<task_id>?ocr_type=llm
+
+# 查询Ollama任务状态
+curl http://localhost:5000/api/unified/ocr/status/<task_id>?ocr_type=ollama
+```
+
+3. **取消任务**
+
+```bash
+# 取消标准OCR任务
+curl -X POST http://localhost:5000/api/unified/ocr/cancel/<task_id>
+
+# 取消LLM任务
+curl -X POST http://localhost:5000/api/unified/ocr/cancel/<task_id>?ocr_type=llm
+
+# 取消Ollama任务
+curl -X POST http://localhost:5000/api/unified/ocr/cancel/<task_id>?ocr_type=ollama
+```
+
+#### 使用旧版 API（向后兼容）
+
+以下接口仍然可用，但内部已重定向到统一 API：
 
 1. **OCR 服务 - 上传文件**
 
@@ -286,11 +345,14 @@ py-ocr/
 │   ├── services/          # 业务逻辑
 │   │   ├── minio_service.py  # MinIO服务
 │   │   ├── ocr_service.py    # OCR服务
-│   │   └── llm_service.py    # LLM服务
+│   │   ├── llm_service.py    # LLM服务
+│   │   └── ollama_ocr_service.py # Ollama OCR服务
 │   ├── tasks/             # Celery任务
 │   │   ├── ocr_task.py       # OCR任务
-│   │   └── llm_task.py       # LLM任务
+│   │   ├── llm_task.py       # LLM任务
+│   │   └── ollama_ocr_task.py # Ollama OCR任务
 │   └── utils/             # 工具函数
+│       └── pdf_utils.py      # PDF处理工具
 ├── tests/                 # 测试目录
 ├── .env                   # 环境变量
 ├── .env.example          # 环境变量示例
@@ -298,6 +360,34 @@ py-ocr/
 ├── celery_worker.py      # Celery工作进程
 └── requirements.txt      # 项目依赖
 ```
+
+### 技术架构与设计优化
+
+#### 1. API 统一设计
+
+为减少代码冗余和提高接口一致性，API 采用统一设计：
+
+- 使用 `ocr_type` 参数区分不同的处理流程
+- 保留旧接口以实现向后兼容
+- 相同类型操作共用同一接口
+
+#### 2. 共享工具类与代码复用
+
+- **PDF 处理工具类**: 所有 OCR 服务共享统一的 PDF 处理逻辑，避免代码重复
+- **异常处理**: 统一的异常类型和处理流程
+- **任务状态管理**: 一致的任务生命周期管理
+
+#### 3. 模块化设计
+
+- **服务层抽象**: 每种 OCR 能力封装在独立服务中
+- **任务与服务分离**: 任务处理逻辑与服务实现分离
+- **工具类集中管理**: 共用功能集中在 utils 包
+
+#### 4. 错误处理与日志
+
+- 全面的错误捕获与处理
+- 详细的日志记录
+- 一致的状态更新机制
 
 ### 开发流程
 

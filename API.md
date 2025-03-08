@@ -4,7 +4,7 @@
 
 - **基础 URL**: `http://localhost:5000/api`
 - **内容类型**: 请求和响应均使用 JSON 格式，除非特别说明
-- **版本**: v1.0.0
+- **版本**: v1.1.0
 
 ## 认证
 
@@ -16,7 +16,249 @@
 
 ## 接口列表
 
-### 1. OCR 文件上传接口
+### 统一 API 设计
+
+从 v1.1.0 开始，服务提供了统一的 API 设计，可以通过 `ocr_type` 参数指定处理类型。
+
+#### OCR 类型参数
+
+| 参数值   | 描述                                    |
+| -------- | --------------------------------------- |
+| standard | 标准 OCR 处理，使用 Tesseract（默认值） |
+| llm      | 基于大模型的 OCR 处理，通过硅基流动 API |
+| ollama   | 基于 Ollama 的本地多模态模型 OCR 处理   |
+
+### 1. 统一文件上传接口
+
+用于上传需要 OCR 处理的文件，支持多种处理类型。
+
+- **URL**: `/ocr/upload`
+- **方法**: `POST`
+- **内容类型**: `multipart/form-data`
+- **参数**:
+
+  | 参数名   | 类型   | 必填 | 描述                                                |
+  | -------- | ------ | ---- | --------------------------------------------------- |
+  | file     | 文件   | 是   | 需要上传的文件，支持 PDF 和常见图片格式             |
+  | ocr_type | 字符串 | 否   | OCR 处理类型，可选值为 standard (默认), llm, ollama |
+
+- **响应**:
+
+  - **成功** (HTTP 200):
+    ```json
+    {
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "message": "文件上传成功，开始处理",
+      "ocr_type": "standard"
+    }
+    ```
+  - **失败** (HTTP 400):
+    ```json
+    {
+      "error": "没有上传文件",
+      "code": "NO_FILE_UPLOADED"
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "不支持的OCR类型: invalid_type",
+      "code": "INVALID_OCR_TYPE"
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "不支持的文件类型",
+      "code": "UNSUPPORTED_FILE_TYPE",
+      "supported_types": ["pdf", "png", "jpg", "jpeg", "tiff"]
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "文件大小超过限制",
+      "code": "FILE_TOO_LARGE",
+      "max_size": 10485760
+    }
+    ```
+  - **失败** (HTTP 500):
+    ```json
+    {
+      "error": "服务器内部错误",
+      "code": "INTERNAL_SERVER_ERROR"
+    }
+    ```
+
+- **示例**:
+
+  ```bash
+  # 使用标准OCR处理（默认）
+  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload
+
+  # 使用LLM处理
+  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload?ocr_type=llm
+
+  # 使用Ollama处理
+  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload?ocr_type=ollama
+  ```
+
+### 2. 统一查询任务状态接口
+
+用于获取 OCR 任务的处理状态和结果。
+
+- **URL**: `/ocr/status/<task_id>`
+- **方法**: `GET`
+- **URL 参数**:
+
+  | 参数名   | 类型   | 必填 | 描述                                                |
+  | -------- | ------ | ---- | --------------------------------------------------- |
+  | task_id  | 字符串 | 是   | 任务 ID                                             |
+  | ocr_type | 字符串 | 否   | OCR 处理类型，可选值为 standard (默认), llm, ollama |
+
+- **响应**:
+
+  - **成功，标准/LLM 处理中** (HTTP 200):
+    ```json
+    {
+      "status": "processing"
+    }
+    ```
+  - **成功，Ollama 处理中** (HTTP 200):
+    ```json
+    {
+      "status": "processing",
+      "task_id": "550e8400-e29b-41d4-a716-446655440000"
+    }
+    ```
+  - **成功，标准/LLM 已完成** (HTTP 200):
+    ```json
+    {
+      "status": "completed",
+      "result_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt",
+      "error": null
+    }
+    ```
+  - **成功，Ollama 已完成** (HTTP 200):
+    ```json
+    {
+      "status": "completed",
+      "task_id": "550e8400-e29b-41d4-a716-446655440000",
+      "minio_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt"
+    }
+    ```
+  - **成功，任务失败** (HTTP 200):
+    ```json
+    {
+      "status": "failed",
+      "error": "OCR处理失败: 文件损坏"
+    }
+    ```
+  - **成功，任务取消** (HTTP 200):
+    ```json
+    {
+      "status": "cancelled",
+      "error": "任务已被用户取消"
+    }
+    ```
+  - **失败，任务不存在** (HTTP 404):
+    ```json
+    {
+      "error": "Task ID not found",
+      "code": "TASK_NOT_FOUND"
+    }
+    ```
+  - **失败，无效的类型** (HTTP 400):
+    ```json
+    {
+      "error": "不支持的OCR类型: invalid_type",
+      "code": "INVALID_OCR_TYPE"
+    }
+    ```
+
+- **示例**:
+
+  ```bash
+  # 查询标准OCR任务状态
+  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000
+
+  # 查询LLM任务状态
+  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000?ocr_type=llm
+
+  # 查询Ollama任务状态
+  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000?ocr_type=ollama
+  ```
+
+### 3. 统一取消任务接口
+
+用于取消正在进行的 OCR 任务。
+
+- **URL**: `/ocr/cancel/<task_id>`
+- **方法**: `POST`
+- **URL 参数**:
+
+  | 参数名   | 类型   | 必填 | 描述                                                |
+  | -------- | ------ | ---- | --------------------------------------------------- |
+  | task_id  | 字符串 | 是   | 任务 ID                                             |
+  | ocr_type | 字符串 | 否   | OCR 处理类型，可选值为 standard (默认), llm, ollama |
+
+- **响应**:
+
+  - **成功** (HTTP 200):
+    ```json
+    {
+      "message": "任务已被用户取消",
+      "ocr_type": "standard"
+    }
+    ```
+  - **失败** (HTTP 400):
+    ```json
+    {
+      "error": "只能取消处理中的任务",
+      "code": "TASK_NOT_PROCESSING",
+      "current_status": "completed"
+    }
+    ```
+    或
+    ```json
+    {
+      "error": "不支持的OCR类型: invalid_type",
+      "code": "INVALID_OCR_TYPE"
+    }
+    ```
+  - **失败，任务不存在** (HTTP 404):
+    ```json
+    {
+      "error": "Task ID not found",
+      "code": "TASK_NOT_FOUND"
+    }
+    ```
+  - **失败，取消失败** (HTTP 400):
+    ```json
+    {
+      "error": "任务取消失败",
+      "code": "CANCEL_FAILED"
+    }
+    ```
+
+- **示例**:
+
+  ```bash
+  # 取消标准OCR任务
+  curl -X POST http://localhost:5000/api/ocr/cancel/550e8400-e29b-41d4-a716-446655440000
+
+  # 取消LLM任务
+  curl -X POST http://localhost:5000/api/ocr/cancel/550e8400-e29b-41d4-a716-446655440000?ocr_type=llm
+
+  # 取消Ollama任务
+  curl -X POST http://localhost:5000/api/ocr/cancel/550e8400-e29b-41d4-a716-446655440000?ocr_type=ollama
+  ```
+
+### 向后兼容接口（旧版）
+
+为保持向后兼容性，以下旧版 API 仍然可用，但内部已重定向到新的统一 API。建议新应用使用统一 API 接口。
+
+### 4. OCR 文件上传接口（旧版）
 
 用于上传需要 OCR 处理的文件。
 
@@ -30,51 +272,14 @@
   | file   | 文件 | 是   | 需要上传的文件，支持 PDF 和常见图片格式 |
 
 - **响应**:
-
-  - **成功** (HTTP 200):
-    ```json
-    {
-      "task_id": "550e8400-e29b-41d4-a716-446655440000",
-      "message": "文件上传成功，正在处理中"
-    }
-    ```
-  - **失败** (HTTP 400):
-    ```json
-    {
-      "error": "没有上传文件",
-      "code": "NO_FILE_UPLOADED"
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "不支持的文件类型",
-      "code": "UNSUPPORTED_FILE_TYPE",
-      "supported_types": ["pdf", "png", "jpg", "jpeg", "tiff"]
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "文件大小超过限制",
-      "code": "FILE_TOO_LARGE",
-      "max_size": 10485760
-    }
-    ```
-  - **失败** (HTTP 500):
-    ```json
-    {
-      "error": "服务器内部错误",
-      "code": "INTERNAL_SERVER_ERROR"
-    }
-    ```
+  与统一上传接口相同，但 ocr_type 固定为 "standard"。
 
 - **示例**:
   ```bash
   curl -X POST -F "file=@test.pdf" http://localhost:5000/api/upload
   ```
 
-### 2. LLM 文件上传接口
+### 5. LLM 文件上传接口（旧版）
 
 用于上传需要通过多模态大模型处理的文件。
 
@@ -88,51 +293,35 @@
   | file   | 文件 | 是   | 需要上传的文件，支持 PDF 和常见图片格式 |
 
 - **响应**:
-
-  - **成功** (HTTP 200):
-    ```json
-    {
-      "task_id": "550e8400-e29b-41d4-a716-446655440000",
-      "message": "文件上传成功，开始LLM处理"
-    }
-    ```
-  - **失败** (HTTP 400):
-    ```json
-    {
-      "error": "没有上传文件",
-      "code": "NO_FILE_UPLOADED"
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "不支持的文件类型",
-      "code": "UNSUPPORTED_FILE_TYPE",
-      "supported_types": ["pdf", "png", "jpg", "jpeg", "tiff"]
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "文件大小超过限制",
-      "code": "FILE_TOO_LARGE",
-      "max_size": 10485760
-    }
-    ```
-  - **失败** (HTTP 500):
-    ```json
-    {
-      "error": "服务器内部错误",
-      "code": "INTERNAL_SERVER_ERROR"
-    }
-    ```
+  与统一上传接口相同，但 ocr_type 固定为 "llm"。
 
 - **示例**:
   ```bash
   curl -X POST -F "file=@test.pdf" http://localhost:5000/api/llm/upload
   ```
 
-### 3. OCR 查询任务状态接口
+### 6. Ollama OCR 文件上传接口（旧版）
+
+用于上传需要通过 Ollama 多模态模型处理的文件。
+
+- **URL**: `/ocr/upload` (注意: 与新 API 的 URL 相同，但不接受 ocr_type 参数)
+- **方法**: `POST`
+- **内容类型**: `multipart/form-data`
+- **参数**:
+
+  | 参数名 | 类型 | 必填 | 描述                                    |
+  | ------ | ---- | ---- | --------------------------------------- |
+  | file   | 文件 | 是   | 需要上传的文件，支持 PDF 和常见图片格式 |
+
+- **响应**:
+  与统一上传接口相同，但 ocr_type 固定为 "ollama"。
+
+- **示例**:
+  ```bash
+  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload
+  ```
+
+### 7. OCR 查询任务状态接口（旧版）
 
 用于获取 OCR 任务的处理状态和结果。
 
@@ -145,51 +334,14 @@
   | task_id | 字符串 | 是   | 任务 ID |
 
 - **响应**:
-
-  - **成功，任务处理中** (HTTP 200):
-    ```json
-    {
-      "status": "processing",
-      "progress": 45,
-      "started_at": "2024-03-07T10:00:00Z",
-      "estimated_completion": "2024-03-07T10:01:00Z"
-    }
-    ```
-  - **成功，任务已完成** (HTTP 200):
-    ```json
-    {
-      "status": "completed",
-      "minio_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt",
-      "completed_at": "2024-03-07T10:01:00Z",
-      "processing_time": 60,
-      "file_size": 1024,
-      "text_length": 500
-    }
-    ```
-  - **成功，任务失败** (HTTP 200):
-    ```json
-    {
-      "status": "failed",
-      "error": "OCR处理失败: 文件损坏",
-      "code": "OCR_PROCESSING_ERROR",
-      "failed_at": "2024-03-07T10:01:00Z",
-      "retry_count": 3
-    }
-    ```
-  - **失败，任务不存在** (HTTP 404):
-    ```json
-    {
-      "error": "Task ID not found",
-      "code": "TASK_NOT_FOUND"
-    }
-    ```
+  与统一状态查询接口相同，但 ocr_type 固定为 "standard"。
 
 - **示例**:
   ```bash
   curl http://localhost:5000/api/status/550e8400-e29b-41d4-a716-446655440000
   ```
 
-### 4. LLM 查询任务状态接口
+### 8. LLM 查询任务状态接口（旧版）
 
 用于获取 LLM 任务的处理状态和结果。
 
@@ -202,14 +354,34 @@
   | task_id | 字符串 | 是   | 任务 ID |
 
 - **响应**:
-  与 OCR 状态查询接口相同。
+  与统一状态查询接口相同，但 ocr_type 固定为 "llm"。
 
 - **示例**:
   ```bash
   curl http://localhost:5000/api/llm/status/550e8400-e29b-41d4-a716-446655440000
   ```
 
-### 5. OCR 取消任务接口
+### 9. Ollama OCR 查询任务状态接口（旧版）
+
+用于获取 Ollama OCR 任务的处理状态和结果。
+
+- **URL**: `/ocr/status/<task_id>` (注意: 与新 API 的 URL 相同，但不接受 ocr_type 参数)
+- **方法**: `GET`
+- **URL 参数**:
+
+  | 参数名  | 类型   | 必填 | 描述    |
+  | ------- | ------ | ---- | ------- |
+  | task_id | 字符串 | 是   | 任务 ID |
+
+- **响应**:
+  与统一状态查询接口相同，但 ocr_type 固定为 "ollama"。
+
+- **示例**:
+  ```bash
+  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000
+  ```
+
+### 10. OCR 取消任务接口（旧版）
 
 用于取消正在进行的 OCR 任务。
 
@@ -222,34 +394,14 @@
   | task_id | 字符串 | 是   | 任务 ID |
 
 - **响应**:
-
-  - **成功** (HTTP 200):
-    ```json
-    {
-      "message": "任务已取消"
-    }
-    ```
-  - **失败** (HTTP 400):
-    ```json
-    {
-      "error": "只能取消处理中的任务",
-      "current_status": "completed"
-    }
-    ```
-  - **失败，任务不存在** (HTTP 404):
-    ```json
-    {
-      "error": "Task ID not found",
-      "code": "TASK_NOT_FOUND"
-    }
-    ```
+  与统一取消接口相同，但 ocr_type 固定为 "standard"。
 
 - **示例**:
   ```bash
   curl -X POST http://localhost:5000/api/cancel/550e8400-e29b-41d4-a716-446655440000
   ```
 
-### 6. LLM 取消任务接口
+### 11. LLM 取消任务接口（旧版）
 
 用于取消正在进行的 LLM 任务。
 
@@ -262,160 +414,18 @@
   | task_id | 字符串 | 是   | 任务 ID |
 
 - **响应**:
-  与 OCR 取消任务接口相同。
+  与统一取消接口相同，但 ocr_type 固定为 "llm"。
 
 - **示例**:
   ```bash
   curl -X POST http://localhost:5000/api/llm/cancel/550e8400-e29b-41d4-a716-446655440000
   ```
 
-### 7. 批量查询任务状态接口
-
-用于批量查询多个任务的状态。
-
-- **URL**: `/status/batch`
-- **方法**: `POST`
-- **内容类型**: `application/json`
-- **请求体**:
-  ```json
-  {
-    "task_ids": [
-      "550e8400-e29b-41d4-a716-446655440000",
-      "550e8400-e29b-41d4-a716-446655440001"
-    ]
-  }
-  ```
-- **响应**:
-  ```json
-  {
-    "results": [
-      {
-        "task_id": "550e8400-e29b-41d4-a716-446655440000",
-        "status": "completed",
-        "minio_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt"
-      },
-      {
-        "task_id": "550e8400-e29b-41d4-a716-446655440001",
-        "status": "processing",
-        "progress": 45
-      }
-    ]
-  }
-  ```
-
-### 8. Ollama OCR 文件上传接口
-
-用于上传需要通过 Ollama 处理的文件，利用 Ollama 的多模态模型识别图片中的文本。
-
-- **URL**: `/ocr/upload`
-- **方法**: `POST`
-- **内容类型**: `multipart/form-data`
-- **参数**:
-
-  | 参数名 | 类型 | 必填 | 描述                                    |
-  | ------ | ---- | ---- | --------------------------------------- |
-  | file   | 文件 | 是   | 需要上传的文件，支持 PDF 和常见图片格式 |
-
-- **响应**:
-
-  - **成功** (HTTP 200):
-    ```json
-    {
-      "task_id": "550e8400-e29b-41d4-a716-446655440000",
-      "message": "文件上传成功，正在使用Ollama OCR处理中"
-    }
-    ```
-  - **失败** (HTTP 400):
-    ```json
-    {
-      "error": "没有上传文件",
-      "code": "NO_FILE_UPLOADED"
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "不支持的文件类型",
-      "code": "UNSUPPORTED_FILE_TYPE",
-      "supported_types": ["pdf", "png", "jpg", "jpeg", "tiff"]
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "文件大小超过限制",
-      "code": "FILE_TOO_LARGE",
-      "max_size": 10485760
-    }
-    ```
-  - **失败** (HTTP 500):
-    ```json
-    {
-      "error": "服务器内部错误",
-      "code": "INTERNAL_SERVER_ERROR"
-    }
-    ```
-
-- **示例**:
-  ```bash
-  curl -X POST -F "file=@test.pdf" http://localhost:5000/api/ocr/upload
-  ```
-
-### 9. Ollama OCR 查询任务状态接口
-
-用于获取 Ollama OCR 任务的处理状态和结果。
-
-- **URL**: `/ocr/status/<task_id>`
-- **方法**: `GET`
-- **URL 参数**:
-
-  | 参数名  | 类型   | 必填 | 描述    |
-  | ------- | ------ | ---- | ------- |
-  | task_id | 字符串 | 是   | 任务 ID |
-
-- **响应**:
-
-  - **成功，任务处理中** (HTTP 200):
-    ```json
-    {
-      "status": "processing",
-      "task_id": "550e8400-e29b-41d4-a716-446655440000"
-    }
-    ```
-  - **成功，任务已完成** (HTTP 200):
-    ```json
-    {
-      "status": "completed",
-      "task_id": "550e8400-e29b-41d4-a716-446655440000",
-      "minio_url": "http://minio.example.com/ocr-results/550e8400-e29b-41d4-a716-446655440000.txt"
-    }
-    ```
-  - **成功，任务失败** (HTTP 200):
-    ```json
-    {
-      "status": "failed",
-      "task_id": "550e8400-e29b-41d4-a716-446655440000",
-      "error": "Ollama OCR处理失败: 服务不可用"
-    }
-    ```
-  - **失败，任务不存在** (HTTP 404):
-    ```json
-    {
-      "error": "Task ID not found",
-      "code": "TASK_NOT_FOUND"
-    }
-    ```
-
-- **示例**:
-  ```bash
-  curl http://localhost:5000/api/ocr/status/550e8400-e29b-41d4-a716-446655440000
-  ```
-
-### 10. Ollama OCR 取消任务接口
+### 12. Ollama OCR 取消任务接口（旧版）
 
 用于取消正在进行的 Ollama OCR 任务。
 
-- **URL**: `/ocr/cancel/<task_id>`
+- **URL**: `/ocr/cancel/<task_id>` (注意: 与新 API 的 URL 相同，但不接受 ocr_type 参数)
 - **方法**: `POST`
 - **URL 参数**:
 
@@ -424,34 +434,7 @@
   | task_id | 字符串 | 是   | 任务 ID |
 
 - **响应**:
-
-  - **成功** (HTTP 200):
-    ```json
-    {
-      "message": "任务已取消"
-    }
-    ```
-  - **失败** (HTTP 400):
-    ```json
-    {
-      "error": "只能取消处理中的任务",
-      "current_status": "completed"
-    }
-    ```
-    或
-    ```json
-    {
-      "error": "取消任务失败",
-      "code": "CANCEL_FAILED"
-    }
-    ```
-  - **失败，任务不存在** (HTTP 404):
-    ```json
-    {
-      "error": "Task ID not found",
-      "code": "TASK_NOT_FOUND"
-    }
-    ```
+  与统一取消接口相同，但 ocr_type 固定为 "ollama"。
 
 - **示例**:
   ```bash

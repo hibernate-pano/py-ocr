@@ -5,138 +5,156 @@ import base64
 from typing import List, Dict, Any, Optional
 import pdf2image
 from threading import Lock
+import time
+from io import BytesIO
+
+from app.utils.pdf_utils import PDFProcessor, TaskCancelledException
 
 logger = logging.getLogger(__name__)
 
 class OllamaOCRIntegration:
-    """直接使用Ollama API的OCR实现，避免依赖问题"""
+    """Ollama OCR集成服务，使用Ollama本地多模态模型进行OCR识别"""
     
     def __init__(self, model_name="llama3.2-vision:11b", output_format="plain_text"):
         """
         初始化Ollama OCR集成服务
         
         参数:
-            model_name: Ollama模型名称，默认为llama3.2-vision:11b
-            output_format: 输出格式，保留做未来扩展
+            model_name: 使用的Ollama模型名称
+            output_format: 输出格式 (plain_text, markdown, json, structured, key_value)
         """
-        self.base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-        self.model_name = model_name
-        self.output_format = output_format
-        self._processing_tasks: Dict[str, bool] = {}  # 记录正在处理的任务
-        self._lock = Lock()  # 用于线程安全的任务状态管理
+        # 从环境变量获取配置
+        self.base_url = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
+        self.model = os.environ.get('OLLAMA_MODEL', model_name)
+        self.output_format = os.environ.get('OLLAMA_OUTPUT_FORMAT', output_format)
+        self.timeout = int(os.environ.get('OLLAMA_TIMEOUT', 120))
         
-        # 创建临时图片目录
-        self.temp_image_dir = os.path.join('temp', 'ollama_images')
+        # 任务处理状态跟踪
+        self._processing_tasks = set()
+        
+        # 临时目录
+        self.temp_image_dir = os.path.join(os.getcwd(), 'temp', 'ollama_images')
         os.makedirs(self.temp_image_dir, exist_ok=True)
-        logger.info(f"创建Ollama临时图片目录: {self.temp_image_dir}")
         
-        # 检查Ollama服务可用性
-        try:
-            response = requests.get(f"{self.base_url}/api/tags")
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [model.get("name") for model in models]
-                logger.info(f"Ollama服务可用，发现{len(models)}个模型")
-                
-                if self.model_name not in model_names:
-                    logger.warning(f"模型 '{self.model_name}' 不可用，请使用 'ollama pull {self.model_name}' 下载")
-            else:
-                logger.warning(f"Ollama服务响应异常: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Ollama服务检查失败: {str(e)}")
-            logger.info("请确保Ollama服务已启动并可访问")
+        # 提示词模板
+        self.prompt_templates = {
+            "plain_text": "从图片中提取所有文本内容，按原始布局排列。",
+            "markdown": "从图片中提取所有文本内容，使用Markdown格式保留原始布局。用**加粗**表示标题，用表格表示表格内容。",
+            "json": "从图片中提取所有文本内容，并以JSON格式返回，包含标题、段落、表格等结构信息。",
+            "structured": "从图片中提取所有结构化内容，识别标题、段落、表格、列表等元素，并保持原始布局。",
+            "key_value": "从图片中提取所有键值对信息，格式为'键: 值'的形式。"
+        }
+        
+        logger.info(f"Ollama OCR服务初始化完成，模型: {self.model}, 输出格式: {self.output_format}")
     
     def _is_task_cancelled(self, task_id: str) -> bool:
-        """检查任务是否已被取消"""
-        with self._lock:
-            if task_id not in self._processing_tasks:
-                return False
-            return self._processing_tasks[task_id]
+        """
+        检查任务是否已取消
+        
+        参数:
+            task_id: 任务ID
+            
+        返回:
+            如果任务已取消，返回True，否则返回False
+        """
+        return task_id not in self._processing_tasks
     
     def cancel_task(self, task_id: str) -> bool:
-        """取消正在处理的任务"""
-        logger.info(f"尝试取消任务: {task_id}")
-        with self._lock:
-            if task_id not in self._processing_tasks:
-                logger.warning(f"任务 {task_id} 不存在或已完成，无法取消")
-                return False
+        """
+        取消任务
+        
+        参数:
+            task_id: 要取消的任务ID
             
-            self._processing_tasks[task_id] = True
-            logger.info(f"任务 {task_id} 已标记为取消")
+        返回:
+            如果任务取消成功或任务已不存在，返回True
+        """
+        if task_id in self._processing_tasks:
+            self._processing_tasks.remove(task_id)
+            logger.info(f"任务已取消: {task_id}")
             return True
+        return False
     
     def start_task(self, task_id: str):
-        """标记任务开始处理"""
-        with self._lock:
-            self._processing_tasks[task_id] = False
-            logger.info(f"任务 {task_id} 开始处理")
+        """
+        标记任务开始处理
+        
+        参数:
+            task_id: 任务ID
+        """
+        self._processing_tasks.add(task_id)
+        logger.info(f"任务开始处理: {task_id}")
     
     def finish_task(self, task_id: str):
-        """标记任务完成处理"""
-        with self._lock:
-            if task_id in self._processing_tasks:
-                del self._processing_tasks[task_id]
-                logger.info(f"任务 {task_id} 处理完成")
+        """
+        标记任务处理完成
+        
+        参数:
+            task_id: 任务ID
+        """
+        if task_id in self._processing_tasks:
+            self._processing_tasks.remove(task_id)
+            logger.info(f"任务处理完成: {task_id}")
     
     def _encode_image_to_base64(self, image_path: str) -> str:
         """将图片编码为base64格式"""
-        try:
-            with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode('utf-8')
-        except Exception as e:
-            logger.error(f"图片编码失败 {image_path}: {str(e)}")
-            raise
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
     
     def process_image(self, image_path: str, task_id: str) -> str:
         """
-        使用Ollama API直接处理单个图片
+        处理单张图片
         
         参数:
             image_path: 图片路径
             task_id: 任务ID
             
         返回:
-            str: 从图片中提取的文本
+            提取的文本内容
         """
-        logger.info(f"处理图片 {image_path} 任务ID {task_id}")
-        
-        # 检查任务是否已取消
-        if self._is_task_cancelled(task_id):
-            logger.info(f"任务 {task_id} 已取消，停止处理图片")
-            raise TaskCancelledException(f"任务 {task_id} 已取消")
-        
         try:
-            # 将图片编码为base64
-            base64_image = self._encode_image_to_base64(image_path)
+            # 检查任务是否已取消
+            if self._is_task_cancelled(task_id):
+                logger.info(f"任务 {task_id} 已取消，停止处理图片")
+                raise TaskCancelledException(f"任务 {task_id} 已取消")
             
-            # 构建Ollama API请求
-            api_url = f"{self.base_url}/api/generate"
+            logger.info(f"使用Ollama处理图片 {image_path}")
+            
+            # 将图片编码为base64
+            image_b64 = self._encode_image_to_base64(image_path)
+            
+            # 构建提示词
+            prompt = self.prompt_templates.get(
+                self.output_format, 
+                self.prompt_templates["plain_text"]
+            )
+            
+            # 构建请求数据
             payload = {
-                "model": self.model_name,
-                "prompt": "Extract all text from this image. Return only the extracted text without any explanations or additional comments.",
-                "stream": False,
-                "options": {
-                    "temperature": 0.1
-                },
-                "images": [base64_image]
+                "model": self.model,
+                "prompt": prompt,
+                "images": [image_b64],
+                "stream": False
             }
             
-            # 发送请求
-            logger.info(f"发送请求到Ollama API，任务ID {task_id}")
-            response = requests.post(api_url, json=payload, timeout=120)
+            # 发送请求到Ollama API
+            logger.info(f"发送请求到Ollama API，使用模型: {self.model}")
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json=payload,
+                timeout=self.timeout
+            )
             
-            if response.status_code == 200:
-                # 解析响应
-                result = response.json()
-                extracted_text = result.get("response", "")
-                
-                logger.info(f"图片处理成功，提取文本长度: {len(extracted_text)}")
-                return extracted_text
-            else:
-                error_msg = f"Ollama API请求失败: HTTP {response.status_code}, {response.text}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-                
+            # 检查响应
+            response.raise_for_status()
+            result = response.json()
+            
+            # 从响应中提取文本
+            extracted_text = result.get("response", "")
+            
+            logger.info(f"Ollama处理完成，提取文本长度: {len(extracted_text)}")
+            return extracted_text
+            
         except TaskCancelledException:
             raise
         except Exception as e:
@@ -147,88 +165,63 @@ class OllamaOCRIntegration:
         """将PDF分割为多个图片"""
         logger.info(f"将PDF分割为图片 {pdf_path} 任务ID {task_id}")
         
-        # 检查任务是否已取消
-        if self._is_task_cancelled(task_id):
-            logger.info(f"任务 {task_id} 已取消，停止PDF分割")
-            raise TaskCancelledException(f"任务 {task_id} 已取消")
+        # 为当前任务创建唯一的临时目录
+        task_temp_dir = os.path.join(self.temp_image_dir, task_id)
+        os.makedirs(task_temp_dir, exist_ok=True)
         
-        try:
-            # 创建任务特定的临时目录
-            task_image_dir = os.path.join(self.temp_image_dir, task_id)
-            os.makedirs(task_image_dir, exist_ok=True)
-            
-            # 转换PDF为图片
-            images = pdf2image.convert_from_path(pdf_path, dpi=300)
-            image_paths = []
-            
-            # 保存每一页为图片
-            for i, image in enumerate(images):
-                # 检查任务是否已取消
-                if self._is_task_cancelled(task_id):
-                    logger.info(f"任务 {task_id} 已取消，停止PDF分割")
-                    raise TaskCancelledException(f"任务 {task_id} 已取消")
-                
-                image_path = os.path.join(task_image_dir, f"page_{i+1}.png")
-                image.save(image_path, "PNG")
-                image_paths.append(image_path)
-                
-                logger.info(f"保存PDF第{i+1}页为图片: {image_path}")
-            
-            return image_paths
-        
-        except TaskCancelledException:
-            raise
-        except Exception as e:
-            logger.error(f"PDF分割失败: {str(e)}")
-            raise
+        # 使用共享PDF处理器
+        return PDFProcessor.split_pdf_to_images(
+            pdf_path=pdf_path,
+            output_dir=task_temp_dir,
+            task_id=task_id,
+            dpi=300,
+            fmt='png',
+            cancel_check_func=self._is_task_cancelled,
+            return_paths=True,
+            thread_count=2,
+            use_pdftocairo=True
+        )
     
     def process_pdf(self, pdf_path: str, task_id: str) -> str:
-        """处理PDF文件"""
-        logger.info(f"开始处理PDF {pdf_path} 任务ID {task_id}")
+        """
+        处理PDF文件
         
+        参数:
+            pdf_path: PDF文件路径
+            task_id: 任务ID
+            
+        返回:
+            提取的文本内容
+        """
         try:
-            # 分割PDF为图片
+            logger.info(f"开始处理PDF {pdf_path} 任务ID {task_id}")
+            
+            # 第一步：将PDF分割为图片
             image_paths = self.split_pdf_to_images(pdf_path, task_id)
+            logger.info(f"PDF分割完成，共{len(image_paths)}页")
             
-            # 处理所有图片并合并结果
-            all_text = []
-            
-            for i, image_path in enumerate(image_paths):
-                # 检查任务是否已取消
-                if self._is_task_cancelled(task_id):
-                    logger.info(f"任务 {task_id} 已取消，停止处理PDF图片")
-                    raise TaskCancelledException(f"任务 {task_id} 已取消")
-                
-                logger.info(f"处理PDF第{i+1}页图片: {image_path}")
-                try:
-                    page_text = self.process_image(image_path, task_id)
-                    all_text.append(f"--- 第{i+1}页 ---\n{page_text}\n")
-                    logger.info(f"成功处理PDF第{i+1}页")
-                except TaskCancelledException:
-                    raise
-                except Exception as e:
-                    error_msg = f"处理第{i+1}页图片失败: {str(e)}"
-                    logger.error(error_msg)
-                    all_text.append(f"--- 第{i+1}页 (处理失败) ---\n{error_msg}\n")
+            # 使用共享处理器处理图片
+            result = PDFProcessor.process_pdf_images(
+                image_paths=image_paths,
+                task_id=task_id,
+                processor_func=self.process_image,
+                cancel_check_func=self._is_task_cancelled
+            )
             
             # 清理临时文件
-            for image_path in image_paths:
-                try:
-                    os.remove(image_path)
-                    logger.info(f"清理临时图片: {image_path}")
-                except Exception as e:
-                    logger.warning(f"清理临时图片失败 {image_path}: {str(e)}")
-            
-            # 尝试清理临时目录
+            task_temp_dir = os.path.join(self.temp_image_dir, task_id)
             try:
-                task_image_dir = os.path.join(self.temp_image_dir, task_id)
-                os.rmdir(task_image_dir)
-                logger.info(f"清理临时目录: {task_image_dir}")
+                for image_path in image_paths:
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                
+                if os.path.exists(task_temp_dir):
+                    os.rmdir(task_temp_dir)
+                    logger.info(f"已清理任务临时目录: {task_temp_dir}")
             except Exception as e:
-                logger.warning(f"清理临时目录失败 {task_id}: {str(e)}")
+                logger.warning(f"清理临时文件失败: {str(e)}")
             
-            # 合并所有页面的文本
-            return "\n".join(all_text)
+            return result
             
         except TaskCancelledException:
             raise
@@ -261,21 +254,16 @@ class OllamaOCRIntegration:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             
-            # 标记任务处理完成
-            self.finish_task(task_id)
-            
+            # 返回结果
+            logger.info(f"文件处理完成，结果长度: {len(result)}")
             return result
             
         except Exception as e:
-            # 标记任务处理完成
-            self.finish_task(task_id)
-            
-            # 重新抛出异常
+            logger.error(f"处理文件失败: {str(e)}")
             raise
+        finally:
+            # 标记任务完成
+            self.finish_task(task_id)
 
-# 创建服务实例
-ollama_ocr_service = OllamaOCRIntegration()
-
-class TaskCancelledException(Exception):
-    """任务取消异常"""
-    pass 
+# 创建单例实例
+ollama_ocr_service = OllamaOCRIntegration() 

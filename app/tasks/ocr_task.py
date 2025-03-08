@@ -4,8 +4,9 @@ from celery import shared_task
 from celery.exceptions import Ignore
 
 from app.models.task import TaskStatus, save_task_status
-from app.services.ocr_service import ocr_service, TaskCancelledException
+from app.services.ocr_service import ocr_service
 from app.services.minio_service import minio_service
+from app.utils.pdf_utils import TaskCancelledException
 
 logger = logging.getLogger(__name__)
 
@@ -28,40 +29,17 @@ def process_ocr(self, task_id, file_path):
             save_task_status(task_id, TaskStatus.FAILED.value, None, error_msg)
             raise FileNotFoundError(error_msg)
         
-        # 获取文件扩展名
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-        
-        # 根据文件类型进行处理
-        if ext == '.pdf':
-            # 第一步：切分PDF为图片
-            try:
-                image_paths = ocr_service.split_pdf_to_images(file_path, task_id)
-            except Exception as e:
-                error_msg = f"PDF切分失败: {str(e)}"
-                logger.error(error_msg)
-                save_task_status(task_id, TaskStatus.FAILED.value, None, error_msg)
-                raise
-            
-            # 第二步：处理图片进行OCR识别
-            try:
-                text_content = ocr_service.process_pdf_images(image_paths, task_id)
-            except Exception as e:
-                logger.error(f"OCR识别失败 {task_id}: {str(e)}")
-                if self.request.retries < self.max_retries:
-                    logger.info(f"重试OCR识别 {task_id}, 第{self.request.retries+1}次")
-                    self.retry(exc=e, countdown=60 * (self.request.retries + 1))
-                raise
-        else:
-            # 直接处理图片文件
-            try:
-                text_content = ocr_service.process_image(file_path, task_id)
-            except Exception as e:
-                logger.error(f"OCR识别失败 {task_id}: {str(e)}")
-                if self.request.retries < self.max_retries:
-                    logger.info(f"重试OCR识别 {task_id}, 第{self.request.retries+1}次")
-                    self.retry(exc=e, countdown=60 * (self.request.retries + 1))
-                raise
+        # 处理文件进行OCR识别
+        try:
+            logger.info(f"开始OCR识别 {task_id}")
+            text_content = ocr_service.process_file(file_path, task_id)
+            logger.info(f"OCR识别完成，文本长度: {len(text_content)}")
+        except Exception as e:
+            logger.error(f"OCR识别失败 {task_id}: {str(e)}")
+            if self.request.retries < self.max_retries:
+                logger.info(f"重试OCR识别 {task_id}, 第{self.request.retries+1}次")
+                self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+            raise
         
         try:
             # 上传结果到MinIO
